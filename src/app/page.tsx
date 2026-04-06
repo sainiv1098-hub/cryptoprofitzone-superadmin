@@ -64,7 +64,7 @@ function SuperAdminApp() {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-6 px-4">
         <div className="flex items-center gap-2 mb-2">
-          <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-cyan-400 rounded-lg flex items-center justify-center text-white font-bold">F</div>
+          <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-cyan-400 rounded-lg flex items-center justify-center text-white font-bold">A</div>
           <h1 className="text-2xl font-bold text-white">Abc<span className="text-indigo-400">Pay</span> Super Admin</h1>
         </div>
         <p className="text-muted text-sm">Sign in with your authorized Google account</p>
@@ -98,7 +98,7 @@ function SuperAdminApp() {
       <aside className={`fixed lg:static z-40 h-full w-60 bg-card-bg border-r border-card-border flex flex-col transition-transform lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="px-4 py-4 border-b border-card-border">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-gradient-to-br from-indigo-500 to-cyan-400 rounded-md flex items-center justify-center text-white font-bold text-xs">F</div>
+            <div className="w-7 h-7 bg-gradient-to-br from-indigo-500 to-cyan-400 rounded-md flex items-center justify-center text-white font-bold text-xs">A</div>
             <span className="text-sm font-bold text-white">Super Admin</span>
           </div>
         </div>
@@ -147,7 +147,7 @@ function DashboardSection() {
   return (
     <div>
       <h2 className="text-white text-xl font-bold mb-4">Welcome, Super Admin</h2>
-      <p className="text-muted text-sm">Use the sidebar to manage the FastPayz platform.</p>
+      <p className="text-muted text-sm">Use the sidebar to manage the AbcPay platform.</p>
     </div>
   );
 }
