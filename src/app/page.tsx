@@ -5,16 +5,17 @@ import { GoogleOAuthProvider, GoogleLogin } from "@react-oauth/google";
 import {
   FiLogOut, FiUsers, FiSettings, FiLayers, FiMail,
   FiCheck, FiX, FiPlus, FiTrash2, FiEdit, FiMenu, FiHome,
-  FiHash, FiCreditCard,
+  FiHash, FiCreditCard, FiDollarSign, FiGift,
 } from "react-icons/fi";
 import { BsBank2 } from "react-icons/bs";
+import QRCode from "react-qr-code";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
 
 interface Admin { email: string; role: string; name: string; }
 
-type Section = "dashboard" | "requests" | "users" | "channels" | "tiers" | "settings" | "admin-emails" | "bank-accounts" | "utrs";
+type Section = "dashboard" | "requests" | "users" | "channels" | "crypto-wallets" | "referral" | "tiers" | "settings" | "admin-emails" | "bank-accounts" | "utrs";
 
 function SuperAdminApp() {
   const [admin, setAdmin] = useState<Admin | null>(null);
@@ -82,6 +83,8 @@ function SuperAdminApp() {
     { key: "requests", label: "Requests", icon: <FiCheck size={18} /> },
     { key: "users", label: "Users", icon: <FiUsers size={18} /> },
     { key: "channels", label: "Channels", icon: <BsBank2 size={18} /> },
+    { key: "crypto-wallets", label: "Crypto Wallets", icon: <FiDollarSign size={18} /> },
+    { key: "referral", label: "Referral", icon: <FiGift size={18} /> },
     { key: "tiers", label: "Tiers", icon: <FiLayers size={18} /> },
     { key: "settings", label: "Settings", icon: <FiSettings size={18} /> },
     { key: "bank-accounts", label: "Bank Accounts", icon: <FiCreditCard size={18} /> },
@@ -132,6 +135,8 @@ function SuperAdminApp() {
           {section === "requests" && <RequestsSection token={token} />}
           {section === "users" && <UsersSection token={token} />}
           {section === "channels" && <ChannelsSection token={token} />}
+          {section === "crypto-wallets" && <CryptoWalletsSection token={token} />}
+          {section === "referral" && <ReferralSection token={token} />}
           {section === "tiers" && <TiersSection token={token} />}
           {section === "settings" && <SettingsSection token={token} />}
           {section === "bank-accounts" && <BankAccountsSection token={token} />}
@@ -154,23 +159,24 @@ function DashboardSection() {
 
 function RequestsSection({ token }: { token: string }) {
   const [tab, setTab] = useState<"deposits" | "withdrawals" | "sec-deposits" | "sec-withdrawals">("deposits");
+  const [statusFilter, setStatusFilter] = useState<"pending" | "approved" | "rejected">("pending");
   const [data, setData] = useState<any[]>([]);
   const [fetching, setFetching] = useState(false);
 
   const fetchData = useCallback(async () => {
     setFetching(true);
     const ep: Record<string, string> = {
-      deposits: "/admin/deposit-requests?status=pending",
-      withdrawals: "/admin/withdrawal-requests?status=pending",
-      "sec-deposits": "/admin/security-deposits?status=pending",
-      "sec-withdrawals": "/admin/security-withdrawals?status=pending",
+      deposits: `/admin/deposit-requests?status=${statusFilter}`,
+      withdrawals: `/admin/withdrawal-requests?status=${statusFilter}`,
+      "sec-deposits": `/admin/security-deposits?status=${statusFilter}`,
+      "sec-withdrawals": `/admin/security-withdrawals?status=${statusFilter}`,
     };
     try {
       const res = await fetch(`${API_URL}${ep[tab]}`, { headers: { Authorization: `Bearer ${token}` } });
       const d = await res.json();
       if (d.success) setData(d.data);
     } catch {} finally { setFetching(false); }
-  }, [token, tab]);
+  }, [token, tab, statusFilter]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -190,25 +196,75 @@ function RequestsSection({ token }: { token: string }) {
 
   return (
     <div>
-      <div className="flex gap-2 mb-4 overflow-x-auto">
+      {/* Tab filter */}
+      <div className="flex gap-2 mb-3 overflow-x-auto">
         {(["deposits", "withdrawals", "sec-deposits", "sec-withdrawals"] as const).map(t => (
           <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 text-xs rounded-full whitespace-nowrap ${tab === t ? "bg-primary text-white" : "bg-card-bg text-muted border border-card-border"}`}>
             {t.replace("-", " ").replace(/\b\w/g, c => c.toUpperCase())}
           </button>
         ))}
       </div>
-      {fetching ? <p className="text-muted">Loading...</p> : data.length === 0 ? <p className="text-muted">No pending requests</p> : (
+
+      {/* Status filter */}
+      <div className="flex gap-2 mb-4">
+        {(["pending", "approved", "rejected"] as const).map(s => (
+          <button
+            key={s}
+            onClick={() => setStatusFilter(s)}
+            className={`px-3 py-1.5 text-xs rounded-full whitespace-nowrap font-medium ${
+              statusFilter === s
+                ? s === "pending" ? "bg-yellow-500 text-black" : s === "approved" ? "bg-success text-white" : "bg-danger text-white"
+                : "bg-card-bg text-muted border border-card-border"
+            }`}
+          >
+            {s.charAt(0).toUpperCase() + s.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {fetching ? <p className="text-muted">Loading...</p> : data.length === 0 ? <p className="text-muted">No {statusFilter} requests</p> : (
         <div className="flex flex-col gap-3">
           {data.map((item: any) => (
-            <div key={item.id} className="bg-card-bg border border-card-border rounded-xl p-3 flex items-center justify-between">
-              <div>
-                <p className="text-white font-bold">{"\u20B9"}{parseFloat(item.amount).toLocaleString()}</p>
-                <p className="text-muted text-xs">{item.userPhone} &bull; {new Date(item.createdAt).toLocaleDateString()}</p>
+            <div key={item.id} className="bg-card-bg border border-card-border rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <p className="text-white font-bold">{"\u20B9"}{parseFloat(item.amount).toLocaleString()}</p>
+                  <p className="text-muted text-xs">{item.userPhone} {item.userName ? `(${item.userName})` : ""} &bull; {new Date(item.createdAt).toLocaleDateString()}</p>
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  {item.paymentMethod && (
+                    <span className="text-[10px] font-bold border border-cyan-500/30 text-cyan-400 px-2 py-0.5 rounded-full">
+                      {item.paymentMethod.toUpperCase()}
+                    </span>
+                  )}
+                  {statusFilter !== "pending" && (
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      item.status === "approved" ? "bg-success/20 text-success" : "bg-danger/20 text-danger"
+                    }`}>
+                      {item.status?.toUpperCase()}
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="flex gap-2">
-                <button onClick={() => handleAction(item.id, "approved")} className="bg-success text-white p-2 rounded-lg"><FiCheck size={16} /></button>
-                <button onClick={() => handleAction(item.id, "rejected")} className="bg-danger text-white p-2 rounded-lg"><FiX size={16} /></button>
-              </div>
+
+              {/* Show UTR/TxnID if present */}
+              {item.utrNumber && (
+                <div className="bg-[#1a2744] border border-card-border rounded-lg px-3 py-2 mb-2">
+                  <p className="text-muted text-[10px]">
+                    {item.paymentMethod === "bep20" || item.paymentMethod === "trc20" ? "Transaction ID" : "UTR Number"}
+                  </p>
+                  <p className="text-cyan-400 text-xs font-medium break-all">{item.utrNumber}</p>
+                </div>
+              )}
+
+              <p className="text-muted text-[10px] mb-3">{item.id.slice(0, 8)}</p>
+
+              {statusFilter === "pending" && (
+                <div className="flex gap-2">
+                  <button onClick={() => handleAction(item.id, "approved")} className="flex-1 flex items-center justify-center gap-1.5 bg-success text-white py-2 rounded-lg text-sm font-semibold"><FiCheck size={16} /> Approve</button>
+                  <button onClick={() => handleAction(item.id, "rejected")} className="flex-1 flex items-center justify-center gap-1.5 bg-danger text-white py-2 rounded-lg text-sm font-semibold"><FiX size={16} /> Reject</button>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -421,6 +477,198 @@ function ChannelsSection({ token }: { token: string }) {
   );
 }
 
+function CryptoWalletsSection({ token }: { token: string }) {
+  const [bep20Wallet, setBep20Wallet] = useState("");
+  const [trc20Wallet, setTrc20Wallet] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    fetch(`${API_URL}/deposit/crypto-wallets`)
+      .then(r => { if (!r.ok) throw new Error("API not available"); return r.json(); })
+      .then(d => {
+        if (d.success) {
+          setBep20Wallet(d.wallets.bep20.address);
+          setTrc20Wallet(d.wallets.trc20.address);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  async function saveSetting(key: string, value: string) {
+    const res = await fetch(`${API_URL}/superadmin/settings/upsert`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ key, value }),
+    });
+    const d = await res.json();
+    if (!d.success) throw new Error(d.message || "Failed to save setting");
+  }
+
+  async function handleSave() {
+    if (!bep20Wallet.trim() && !trc20Wallet.trim()) {
+      setMsg("Please enter at least one wallet address.");
+      return;
+    }
+    setSaving(true);
+    setMsg("");
+    try {
+      const promises = [];
+      if (bep20Wallet.trim()) promises.push(saveSetting("crypto_bep20_wallet", bep20Wallet.trim()));
+      if (trc20Wallet.trim()) promises.push(saveSetting("crypto_trc20_wallet", trc20Wallet.trim()));
+      await Promise.all(promises);
+      setMsg("Crypto wallets saved successfully!");
+    } catch (err: any) {
+      setMsg(err.message || "Failed to save.");
+    } finally {
+      setSaving(false);
+      setTimeout(() => setMsg(""), 5000);
+    }
+  }
+
+  const inputCls = "border border-card-border rounded-lg px-3 py-2 text-white text-sm w-full";
+
+  return (
+    <div>
+      <h2 className="text-white font-bold mb-4">Crypto Wallet Addresses</h2>
+      <p className="text-muted text-xs mb-6">Enter USDT wallet addresses. QR codes are automatically generated for users on the deposit page.</p>
+
+      {/* BEP20 */}
+      <div className="bg-card-bg border border-card-border rounded-xl p-4 mb-4">
+        <p className="text-white font-semibold text-sm mb-3">USDT BEP20 <span className="text-muted text-xs">(Binance Smart Chain)</span></p>
+        <div>
+          <label className="text-muted text-xs mb-1 block">Wallet Address</label>
+          <input
+            placeholder="Enter BEP20 wallet address"
+            value={bep20Wallet}
+            onChange={e => setBep20Wallet(e.target.value)}
+            className={inputCls}
+          />
+        </div>
+        {bep20Wallet && <p className="text-green-400 text-[10px] mt-2">QR code will be auto-generated for users</p>}
+      </div>
+
+      {/* TRC20 */}
+      <div className="bg-card-bg border border-card-border rounded-xl p-4 mb-4">
+        <p className="text-white font-semibold text-sm mb-3">USDT TRC20 <span className="text-muted text-xs">(Tron Network)</span></p>
+        <div>
+          <label className="text-muted text-xs mb-1 block">Wallet Address</label>
+          <input
+            placeholder="Enter TRC20 wallet address"
+            value={trc20Wallet}
+            onChange={e => setTrc20Wallet(e.target.value)}
+            className={inputCls}
+          />
+        </div>
+        {trc20Wallet && <p className="text-green-400 text-[10px] mt-2">QR code will be auto-generated for users</p>}
+      </div>
+
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        className="w-full bg-success text-white py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50"
+      >
+        {saving ? "Saving..." : "Save Crypto Wallets"}
+      </button>
+
+      {msg && <p className="text-center text-xs mt-3 text-green-400">{msg}</p>}
+    </div>
+  );
+}
+
+function ReferralSection({ token }: { token: string }) {
+  const [commission, setCommission] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API_URL}/superadmin/settings`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => {
+        if (d.success) {
+          const setting = d.data.find((s: any) => s.key === "referral_commission");
+          if (setting) setCommission(setting.value);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, [token]);
+
+  async function handleSave() {
+    if (!commission.trim() || isNaN(Number(commission)) || Number(commission) < 0) {
+      setMsg("Please enter a valid commission percentage.");
+      return;
+    }
+    setSaving(true);
+    setMsg("");
+    try {
+      const res = await fetch(`${API_URL}/superadmin/settings/upsert`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ key: "referral_commission", value: commission.trim() }),
+      });
+      const d = await res.json();
+      if (d.success) setMsg("Referral commission saved!");
+      else throw new Error(d.message || "Failed");
+    } catch (err: any) {
+      setMsg(err.message || "Failed to save.");
+    } finally {
+      setSaving(false);
+      setTimeout(() => setMsg(""), 4000);
+    }
+  }
+
+  return (
+    <div>
+      <h2 className="text-white font-bold mb-2">Referral Commission</h2>
+      <p className="text-muted text-xs mb-6">
+        Set the commission percentage a referrer earns when their referred user&apos;s first deposit is approved.
+      </p>
+
+      <div className="bg-card-bg border border-card-border rounded-xl p-4 mb-4 max-w-md">
+        <label className="text-muted text-xs mb-2 block">Commission Percentage (%)</label>
+        {!loaded ? (
+          <p className="text-muted text-sm">Loading...</p>
+        ) : (
+          <div className="flex items-center gap-3">
+            <div className="flex items-center border border-card-border rounded-lg overflow-hidden flex-1">
+              <input
+                type="text"
+                placeholder="e.g. 5"
+                value={commission}
+                onChange={e => setCommission(e.target.value.replace(/[^0-9.]/g, ""))}
+                inputMode="decimal"
+                className="flex-1 text-white text-sm px-3 py-2.5 placeholder:text-muted"
+              />
+              <span className="text-muted font-bold px-3 text-sm border-l border-card-border">%</span>
+            </div>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="bg-success text-white px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50 shrink-0"
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        )}
+        {msg && <p className={`text-xs mt-3 ${msg.includes("saved") ? "text-green-400" : "text-danger"}`}>{msg}</p>}
+      </div>
+
+      <div className="bg-[#1a2744] border border-card-border rounded-xl p-4 max-w-md">
+        <p className="text-white text-sm font-semibold mb-2">How it works</p>
+        <ul className="text-muted text-xs flex flex-col gap-1.5">
+          <li>1. User A shares their referral code with User B</li>
+          <li>2. User B signs up using User A&apos;s referral code</li>
+          <li>3. User B makes a deposit and it gets approved</li>
+          <li>4. User A receives <span className="text-green-400 font-medium">{commission || "0"}%</span> of that first deposit as commission</li>
+          <li>5. Commission is only paid once per referred user (first deposit only)</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 function TiersSection({ token }: { token: string }) {
   const [tiers, setTiers] = useState<any[]>([]);
   useEffect(() => {
@@ -556,14 +804,65 @@ function AdminEmailsSection({ token }: { token: string }) {
 
 function BankAccountsSection({ token }: { token: string }) {
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   useEffect(() => {
     fetch(`${API_URL}/superadmin/bank-accounts`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json()).then(d => { if (d.success) setAccounts(d.data); });
   }, [token]);
 
+  const bankAccts = accounts.filter(a => a.type !== "upi");
+  const upiAccts = accounts.filter(a => a.type === "upi");
+
   return (
     <div>
-      <h2 className="text-white font-bold mb-4">Bank Accounts ({accounts.length})</h2>
+      {/* UPI Accounts */}
+      {upiAccts.length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-white font-bold mb-4">UPI Accounts ({upiAccts.length})</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {upiAccts.map((a: any) => (
+              <div key={a.id} className="bg-card-bg border border-card-border rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-500/20 text-green-400">UPI</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      a.status === "active" ? "bg-success/20 text-success" :
+                      a.status === "pending" ? "bg-warning/20 text-warning" :
+                      "bg-danger/20 text-danger"
+                    }`}>{a.status}</span>
+                  </div>
+                  <span className="text-muted text-[10px]">{a.userPhone}</span>
+                </div>
+                <p className="text-white text-sm font-semibold mb-1">{a.upiId}</p>
+                {a.accountHolderName && a.accountHolderName !== "-" && (
+                  <p className="text-muted text-xs mb-2">{a.accountHolderName}</p>
+                )}
+                <button
+                  onClick={() => setExpandedId(expandedId === a.id ? null : a.id)}
+                  className="text-primary text-[10px] font-medium"
+                >
+                  {expandedId === a.id ? "Hide QR" : "Show QR"}
+                </button>
+                {expandedId === a.id && a.upiId && (
+                  <div className="mt-3 flex justify-center">
+                    {a.qrCodeUrl ? (
+                      <img src={a.qrCodeUrl} alt="QR" className="w-32 h-32 rounded-lg bg-white p-1 object-contain" />
+                    ) : (
+                      <div className="w-32 h-32 rounded-lg bg-white p-2 flex items-center justify-center">
+                        <QRCode value={`upi://pay?pa=${a.upiId}`} size={112} />
+                      </div>
+                    )}
+                  </div>
+                )}
+                <p className="text-muted text-[10px] mt-2">{new Date(a.createdAt).toLocaleDateString()}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Bank Accounts */}
+      <h2 className="text-white font-bold mb-4">Bank Accounts ({bankAccts.length})</h2>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr className="text-muted text-xs border-b border-card-border">
@@ -572,17 +871,19 @@ function BankAccountsSection({ token }: { token: string }) {
             <th className="text-left py-2 px-2">Account No</th>
             <th className="text-left py-2 px-2">Holder</th>
             <th className="text-left py-2 px-2">IFSC</th>
+            <th className="text-left py-2 px-2">UPI ID</th>
             <th className="text-left py-2 px-2">Status</th>
             <th className="text-left py-2 px-2">Date</th>
           </tr></thead>
           <tbody>
-            {accounts.map((a: any) => (
+            {bankAccts.map((a: any) => (
               <tr key={a.id} className="border-b border-card-border/50">
                 <td className="py-2 px-2 text-white text-xs">{a.userPhone}</td>
                 <td className="py-2 px-2 text-white text-xs">{a.bankName}</td>
                 <td className="py-2 px-2 text-muted text-xs">{a.accountNo}</td>
                 <td className="py-2 px-2 text-muted text-xs">{a.accountHolderName}</td>
                 <td className="py-2 px-2 text-muted text-xs">{a.ifscCode}</td>
+                <td className="py-2 px-2 text-cyan-400 text-xs">{a.upiId || "-"}</td>
                 <td className="py-2 px-2">
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                     a.status === "active" ? "bg-success/20 text-success" :
@@ -601,45 +902,85 @@ function BankAccountsSection({ token }: { token: string }) {
 }
 
 function UTRsSection({ token }: { token: string }) {
+  const [statusFilter, setStatusFilter] = useState<"pending" | "approved" | "rejected">("pending");
   const [utrList, setUtrList] = useState<any[]>([]);
-  useEffect(() => {
-    fetch(`${API_URL}/superadmin/utrs`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json()).then(d => { if (d.success) setUtrList(d.data); });
-  }, [token]);
+  const [fetching, setFetching] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    setFetching(true);
+    try {
+      const res = await fetch(`${API_URL}/admin/utrs?status=${statusFilter}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const d = await res.json();
+      if (d.success) setUtrList(d.data);
+    } catch {} finally { setFetching(false); }
+  }, [token, statusFilter]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  async function handleAction(id: string, status: string) {
+    await fetch(`${API_URL}/admin/update-utr`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id, status }),
+    });
+    setUtrList(prev => prev.filter(i => i.id !== id));
+  }
 
   return (
     <div>
-      <h2 className="text-white font-bold mb-4">UTRs ({utrList.length})</h2>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead><tr className="text-muted text-xs border-b border-card-border">
-            <th className="text-left py-2 px-2">User</th>
-            <th className="text-left py-2 px-2">UTR Number</th>
-            <th className="text-left py-2 px-2">Amount</th>
-            <th className="text-left py-2 px-2">Bank</th>
-            <th className="text-left py-2 px-2">Status</th>
-            <th className="text-left py-2 px-2">Date</th>
-          </tr></thead>
-          <tbody>
-            {utrList.map((u: any) => (
-              <tr key={u.id} className="border-b border-card-border/50">
-                <td className="py-2 px-2 text-white text-xs">{u.userPhone}</td>
-                <td className="py-2 px-2 text-cyan-400 text-xs font-medium">{u.utrNumber}</td>
-                <td className="py-2 px-2 text-white text-xs">{"\u20B9"}{parseFloat(u.amount).toLocaleString()}</td>
-                <td className="py-2 px-2 text-muted text-xs">{u.bankName || "-"}</td>
-                <td className="py-2 px-2">
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    u.status === "approved" ? "bg-success/20 text-success" :
-                    u.status === "pending" ? "bg-warning/20 text-warning" :
-                    "bg-danger/20 text-danger"
-                  }`}>{u.status}</span>
-                </td>
-                <td className="py-2 px-2 text-muted text-xs">{new Date(u.createdAt).toLocaleDateString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <h2 className="text-white font-bold mb-4">UTRs</h2>
+
+      {/* Status filter */}
+      <div className="flex gap-2 mb-4">
+        {(["pending", "approved", "rejected"] as const).map(s => (
+          <button
+            key={s}
+            onClick={() => setStatusFilter(s)}
+            className={`px-3 py-1.5 text-xs rounded-full whitespace-nowrap font-medium ${
+              statusFilter === s
+                ? s === "pending" ? "bg-yellow-500 text-black" : s === "approved" ? "bg-success text-white" : "bg-danger text-white"
+                : "bg-card-bg text-muted border border-card-border"
+            }`}
+          >
+            {s.charAt(0).toUpperCase() + s.slice(1)}
+          </button>
+        ))}
       </div>
+
+      {fetching ? <p className="text-muted">Loading...</p> : utrList.length === 0 ? <p className="text-muted">No {statusFilter} UTRs</p> : (
+        <div className="flex flex-col gap-3">
+          {utrList.map((item: any) => (
+            <div key={item.id} className="bg-card-bg border border-card-border rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <p className="text-cyan-400 text-sm font-bold">{item.utrNumber}</p>
+                  <p className="text-white font-bold text-lg">{"\u20B9"}{parseFloat(item.amount).toLocaleString()}</p>
+                  <p className="text-muted text-xs">{item.userPhone} {item.userName ? `(${item.userName})` : ""}</p>
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  {item.bankName && (
+                    <span className="text-[10px] font-bold border border-card-border text-muted px-2 py-0.5 rounded-full">{item.bankName}</span>
+                  )}
+                  {statusFilter !== "pending" && (
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      item.status === "approved" ? "bg-success/20 text-success" : "bg-danger/20 text-danger"
+                    }`}>{item.status?.toUpperCase()}</span>
+                  )}
+                </div>
+              </div>
+              <p className="text-muted text-[10px] mb-3">{new Date(item.createdAt).toLocaleString()} &bull; {item.id.slice(0, 8)}</p>
+              {statusFilter === "pending" && (
+                <div className="flex gap-2">
+                  <button onClick={() => handleAction(item.id, "approved")} className="flex-1 flex items-center justify-center gap-1.5 bg-success text-white py-2 rounded-lg text-sm font-semibold"><FiCheck size={16} /> Approve</button>
+                  <button onClick={() => handleAction(item.id, "rejected")} className="flex-1 flex items-center justify-center gap-1.5 bg-danger text-white py-2 rounded-lg text-sm font-semibold"><FiX size={16} /> Reject</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
