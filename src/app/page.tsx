@@ -703,10 +703,19 @@ function SettingsSection({ token }: { token: string }) {
   const [settings, setSettings] = useState<any[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [telegramUrl, setTelegramUrl] = useState("");
+  const [telegramSaving, setTelegramSaving] = useState(false);
+  const [telegramStatus, setTelegramStatus] = useState<string | null>(null);
 
   useEffect(() => {
     fetch(`${API_URL}/superadmin/settings`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json()).then(d => { if (d.success) setSettings(d.data); });
+      .then(r => r.json()).then(d => {
+        if (d.success) {
+          setSettings(d.data);
+          const existing = d.data.find((s: any) => s.key === "telegram_support_url");
+          if (existing) setTelegramUrl(existing.value);
+        }
+      });
   }, [token]);
 
   async function handleSave(key: string) {
@@ -718,9 +727,62 @@ function SettingsSection({ token }: { token: string }) {
     setEditing(null);
   }
 
+  async function handleSaveTelegram() {
+    setTelegramSaving(true);
+    setTelegramStatus(null);
+    try {
+      const res = await fetch(`${API_URL}/superadmin/settings/upsert`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ key: "telegram_support_url", value: telegramUrl.trim() }),
+      });
+      const d = await res.json();
+      if (d.success) {
+        setTelegramStatus("Saved");
+        setSettings(prev => {
+          const exists = prev.some(s => s.key === "telegram_support_url");
+          if (exists) return prev.map(s => s.key === "telegram_support_url" ? { ...s, value: telegramUrl.trim() } : s);
+          return [...prev, { id: "telegram_support_url", key: "telegram_support_url", value: telegramUrl.trim() }];
+        });
+      } else {
+        setTelegramStatus(d.message || "Failed to save");
+      }
+    } catch {
+      setTelegramStatus("Network error");
+    } finally {
+      setTelegramSaving(false);
+    }
+  }
+
   return (
     <div>
       <h2 className="text-white font-bold mb-4">Settings</h2>
+
+      {/* Telegram Support URL */}
+      <div className="bg-card-bg border border-card-border rounded-xl p-4 mb-4">
+        <p className="text-white font-semibold text-sm mb-1">Telegram Support URL</p>
+        <p className="text-muted text-xs mb-3">
+          This URL opens when a user taps Support in the app sidebar. Use a t.me link (e.g. https://t.me/yourchannel).
+        </p>
+        <input
+          type="url"
+          value={telegramUrl}
+          onChange={(e) => setTelegramUrl(e.target.value)}
+          placeholder="https://t.me/yoursupportaccount"
+          className="w-full border border-card-border rounded-lg px-3 py-2 text-white text-sm bg-transparent mb-3"
+        />
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleSaveTelegram}
+            disabled={telegramSaving}
+            className="bg-success text-white px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-50"
+          >
+            {telegramSaving ? "Saving..." : "Save Telegram URL"}
+          </button>
+          {telegramStatus && <span className="text-muted text-xs">{telegramStatus}</span>}
+        </div>
+      </div>
+
       <div className="flex flex-col gap-3">
         {settings.map((s: any) => (
           <div key={s.id} className="bg-card-bg border border-card-border rounded-xl p-4">
