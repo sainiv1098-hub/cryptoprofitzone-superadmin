@@ -494,6 +494,9 @@ function ChannelsSection({ token }: { token: string }) {
 function CryptoWalletsSection({ token }: { token: string }) {
   const [bep20Wallet, setBep20Wallet] = useState("");
   const [trc20Wallet, setTrc20Wallet] = useState("");
+  const [bep20Qr, setBep20Qr] = useState("");
+  const [trc20Qr, setTrc20Qr] = useState("");
+  const [uploading, setUploading] = useState<"bep20" | "trc20" | null>(null);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
 
@@ -504,10 +507,36 @@ function CryptoWalletsSection({ token }: { token: string }) {
         if (d.success) {
           setBep20Wallet(d.wallets.bep20.address);
           setTrc20Wallet(d.wallets.trc20.address);
+          setBep20Qr(d.wallets.bep20.qrUrl || "");
+          setTrc20Qr(d.wallets.trc20.qrUrl || "");
         }
       })
       .catch(() => {});
   }, []);
+
+  async function uploadQR(file: File, which: "bep20" | "trc20") {
+    setUploading(which);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`${API_URL}/upload/qr`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      const d = await res.json();
+      if (d.success && d.url) {
+        if (which === "bep20") setBep20Qr(d.url);
+        else setTrc20Qr(d.url);
+      } else {
+        setMsg(d.message || "Failed to upload QR.");
+      }
+    } catch {
+      setMsg("Network error while uploading QR.");
+    } finally {
+      setUploading(null);
+    }
+  }
 
   async function saveSetting(key: string, value: string) {
     const res = await fetch(`${API_URL}/superadmin/settings/upsert`, {
@@ -530,6 +559,8 @@ function CryptoWalletsSection({ token }: { token: string }) {
       const promises = [];
       if (bep20Wallet.trim()) promises.push(saveSetting("crypto_bep20_wallet", bep20Wallet.trim()));
       if (trc20Wallet.trim()) promises.push(saveSetting("crypto_trc20_wallet", trc20Wallet.trim()));
+      promises.push(saveSetting("crypto_bep20_qr", bep20Qr));
+      promises.push(saveSetting("crypto_trc20_qr", trc20Qr));
       await Promise.all(promises);
       setMsg("Crypto wallets saved successfully!");
     } catch (err: any) {
@@ -542,10 +573,37 @@ function CryptoWalletsSection({ token }: { token: string }) {
 
   const inputCls = "border border-card-border rounded-lg px-3 py-2 text-white text-sm w-full";
 
+  function QrUploader({ which, qrUrl, onClear }: { which: "bep20" | "trc20"; qrUrl: string; onClear: () => void }) {
+    return (
+      <div className="mt-3">
+        <label className="text-muted text-xs mb-1 block">QR Code Image (optional)</label>
+        {qrUrl ? (
+          <div className="flex items-center gap-3">
+            <img src={qrUrl} alt="QR" className="w-24 h-24 rounded-lg bg-white p-1 object-contain" />
+            <button type="button" onClick={onClear} className="text-danger text-xs">Remove</button>
+          </div>
+        ) : (
+          <label className="flex items-center gap-2 bg-primary/20 text-primary text-xs px-3 py-2 rounded-lg cursor-pointer w-fit">
+            {uploading === which ? "Uploading..." : "Upload QR Image"}
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) uploadQR(file, which);
+              }}
+            />
+          </label>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div>
       <h2 className="text-white font-bold mb-4">Crypto Wallet Addresses</h2>
-      <p className="text-muted text-xs mb-6">Enter USDT wallet addresses. QR codes are automatically generated for users on the deposit page.</p>
+      <p className="text-muted text-xs mb-6">Enter USDT wallet addresses. Upload a QR image to show users on the deposit page; otherwise one is auto-generated from the address.</p>
 
       {/* BEP20 */}
       <div className="bg-card-bg border border-card-border rounded-xl p-4 mb-4">
@@ -559,7 +617,7 @@ function CryptoWalletsSection({ token }: { token: string }) {
             className={inputCls}
           />
         </div>
-        {bep20Wallet && <p className="text-green-400 text-[10px] mt-2">QR code will be auto-generated for users</p>}
+        <QrUploader which="bep20" qrUrl={bep20Qr} onClear={() => setBep20Qr("")} />
       </div>
 
       {/* TRC20 */}
@@ -574,7 +632,7 @@ function CryptoWalletsSection({ token }: { token: string }) {
             className={inputCls}
           />
         </div>
-        {trc20Wallet && <p className="text-green-400 text-[10px] mt-2">QR code will be auto-generated for users</p>}
+        <QrUploader which="trc20" qrUrl={trc20Qr} onClear={() => setTrc20Qr("")} />
       </div>
 
       <button
