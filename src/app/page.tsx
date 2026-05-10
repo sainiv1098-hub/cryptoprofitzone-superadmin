@@ -174,6 +174,7 @@ function DashboardSection() {
 function RequestsSection({ token }: { token: string }) {
   const [tab, setTab] = useState<"deposits" | "withdrawals" | "sec-deposits" | "sec-withdrawals">("deposits");
   const [statusFilter, setStatusFilter] = useState<"pending" | "approved" | "rejected">("pending");
+  const [search, setSearch] = useState("");
   const [data, setData] = useState<any[]>([]);
   const [fetching, setFetching] = useState(false);
 
@@ -208,37 +209,59 @@ function RequestsSection({ token }: { token: string }) {
     setData(prev => prev.filter(i => i.id !== id));
   }
 
+  const filtered = search
+    ? data.filter((item) => {
+        const s = search.toLowerCase();
+        return item.userPhone?.toLowerCase().includes(s) || item.userName?.toLowerCase().includes(s);
+      })
+    : data;
+
   return (
     <div>
-      {/* Tab filter */}
-      <div className="flex gap-2 mb-3 overflow-x-auto">
-        {(["deposits", "withdrawals", "sec-deposits", "sec-withdrawals"] as const).map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 text-xs rounded-full whitespace-nowrap ${tab === t ? "bg-primary text-white" : "bg-card-bg text-muted border border-card-border"}`}>
-            {t.replace("-", " ").replace(/\b\w/g, c => c.toUpperCase())}
-          </button>
-        ))}
-      </div>
+      <h2 className="text-white font-bold mb-4">Requests</h2>
 
-      {/* Status filter */}
-      <div className="flex gap-2 mb-4">
-        {(["pending", "approved", "rejected"] as const).map(s => (
-          <button
-            key={s}
-            onClick={() => setStatusFilter(s)}
-            className={`px-3 py-1.5 text-xs rounded-full whitespace-nowrap font-medium ${
-              statusFilter === s
-                ? s === "pending" ? "bg-yellow-500 text-black" : s === "approved" ? "bg-success text-white" : "bg-danger text-white"
-                : "bg-card-bg text-muted border border-card-border"
-            }`}
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3 mb-4">
+        <div className="flex flex-col gap-1">
+          <label className="text-muted text-[10px] font-medium uppercase tracking-wide">Type</label>
+          <select
+            value={tab}
+            onChange={(e) => setTab(e.target.value as typeof tab)}
+            className="bg-card-bg border border-card-border text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-primary cursor-pointer min-w-40"
           >
-            {s.charAt(0).toUpperCase() + s.slice(1)}
-          </button>
-        ))}
+            <option value="deposits">Deposits</option>
+            <option value="withdrawals">Withdrawals</option>
+            <option value="sec-deposits">Security Deposits</option>
+            <option value="sec-withdrawals">Security Withdrawals</option>
+          </select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-muted text-[10px] font-medium uppercase tracking-wide">Status</label>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+            className="bg-card-bg border border-card-border text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-primary cursor-pointer min-w-32"
+          >
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-muted text-[10px] font-medium uppercase tracking-wide">Search</label>
+          <input
+            type="text"
+            placeholder="Phone or name..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="bg-card-bg border border-card-border text-white text-sm rounded-lg px-3 py-2 placeholder:text-muted focus:outline-none focus:border-primary min-w-40"
+          />
+        </div>
       </div>
 
-      {fetching ? <p className="text-muted">Loading...</p> : data.length === 0 ? <p className="text-muted">No {statusFilter} requests</p> : (
+      {fetching ? <p className="text-muted">Loading...</p> : filtered.length === 0 ? <p className="text-muted">No {statusFilter} {search ? `results for "${search}"` : "requests"}</p> : (
         <div className="flex flex-col gap-3">
-          {data.map((item: any) => (
+          {filtered.map((item: any) => (
             <div key={item.id} className="bg-card-bg border border-card-border rounded-xl p-4">
               <div className="flex items-center justify-between mb-2">
                 <div>
@@ -289,27 +312,109 @@ function RequestsSection({ token }: { token: string }) {
 
 function UsersSection({ token }: { token: string }) {
   const [users, setUsers] = useState<any[]>([]);
+  const [editingUser, setEditingUser] = useState<any | null>(null);
+  const [editBlocked, setEditBlocked] = useState("");
+  const [editWdr, setEditWdr] = useState("");
+  const [saving, setSaving] = useState(false);
+
   useEffect(() => {
     fetch(`${API_URL}/superadmin/users`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json()).then(d => { if (d.success) setUsers(d.data); });
   }, [token]);
 
+  function openEdit(u: any) {
+    setEditingUser(u);
+    setEditBlocked(u.blockedDeposit ?? "0.00");
+    setEditWdr(u.wdrHold ?? "0.00");
+  }
+
+  async function handleSave() {
+    if (!editingUser) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_URL}/superadmin/users/update`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id: editingUser.id, blockedDeposit: editBlocked, wdrHold: editWdr }),
+      });
+      const d = await res.json();
+      if (d.success) {
+        setUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, blockedDeposit: editBlocked, wdrHold: editWdr } : u));
+        setEditingUser(null);
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputCls = "border border-card-border rounded-lg px-3 py-2 text-white text-sm w-full";
+
   return (
     <div>
       <h2 className="text-white font-bold mb-4">Users ({users.length})</h2>
+
+      {/* Edit modal */}
+      {editingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+          <div className="w-full max-w-sm bg-card-bg border border-card-border rounded-2xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-white font-bold">Edit User — {editingUser.phone}</p>
+              <button onClick={() => setEditingUser(null)} className="text-muted"><FiX size={18} /></button>
+            </div>
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="text-muted text-xs mb-1 block">Blocked Deposit (₹)</label>
+                <input
+                  value={editBlocked}
+                  onChange={e => setEditBlocked(e.target.value.replace(/[^0-9.]/g, ""))}
+                  inputMode="decimal"
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className="text-muted text-xs mb-1 block">WDR Hold (₹)</label>
+                <input
+                  value={editWdr}
+                  onChange={e => setEditWdr(e.target.value.replace(/[^0-9.]/g, ""))}
+                  inputMode="decimal"
+                  className={inputCls}
+                />
+              </div>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="w-full bg-success text-white py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50"
+              >
+                {saving ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr className="text-muted text-xs border-b border-card-border">
-            <th className="text-left py-2 px-2">Phone</th><th className="text-left py-2 px-2">Email</th><th className="text-left py-2 px-2">Balance</th><th className="text-left py-2 px-2">Referral</th><th className="text-left py-2 px-2">Date</th>
+            <th className="text-left py-2 px-2">Phone</th>
+            <th className="text-left py-2 px-2">Balance</th>
+            <th className="text-left py-2 px-2">Blocked Dep</th>
+            <th className="text-left py-2 px-2">WDR Hold</th>
+            <th className="text-left py-2 px-2">Referral</th>
+            <th className="text-left py-2 px-2">Date</th>
+            <th className="text-left py-2 px-2">Edit</th>
           </tr></thead>
           <tbody>
             {users.map((u: any) => (
               <tr key={u.id} className="border-b border-card-border/50">
                 <td className="py-2 px-2 text-white">{u.phone}</td>
-                <td className="py-2 px-2 text-muted text-xs">{u.email || "-"}</td>
                 <td className="py-2 px-2 text-white">{u.balance}</td>
+                <td className="py-2 px-2 text-warning">{u.blockedDeposit ?? "0.00"}</td>
+                <td className="py-2 px-2 text-cyan-400">{u.wdrHold ?? "0.00"}</td>
                 <td className="py-2 px-2 text-cyan-400 text-xs">{u.referralCode}</td>
                 <td className="py-2 px-2 text-muted text-xs">{new Date(u.createdAt).toLocaleDateString()}</td>
+                <td className="py-2 px-2">
+                  <button onClick={() => openEdit(u)} className="text-muted hover:text-white p-1"><FiEdit size={14} /></button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -1037,6 +1142,7 @@ function BankAccountsSection({ token }: { token: string }) {
 
 function UTRsSection({ token }: { token: string }) {
   const [statusFilter, setStatusFilter] = useState<"pending" | "approved" | "rejected">("pending");
+  const [utrSearch, setUtrSearch] = useState("");
   const [utrList, setUtrList] = useState<any[]>([]);
   const [fetching, setFetching] = useState(false);
 
@@ -1062,30 +1168,46 @@ function UTRsSection({ token }: { token: string }) {
     setUtrList(prev => prev.filter(i => i.id !== id));
   }
 
+  const utrFiltered = utrSearch
+    ? utrList.filter((item) => {
+        const s = utrSearch.toLowerCase();
+        return item.utrNumber?.toLowerCase().includes(s) || item.userPhone?.toLowerCase().includes(s) || item.userName?.toLowerCase().includes(s);
+      })
+    : utrList;
+
   return (
     <div>
       <h2 className="text-white font-bold mb-4">UTRs</h2>
 
-      {/* Status filter */}
-      <div className="flex gap-2 mb-4">
-        {(["pending", "approved", "rejected"] as const).map(s => (
-          <button
-            key={s}
-            onClick={() => setStatusFilter(s)}
-            className={`px-3 py-1.5 text-xs rounded-full whitespace-nowrap font-medium ${
-              statusFilter === s
-                ? s === "pending" ? "bg-yellow-500 text-black" : s === "approved" ? "bg-success text-white" : "bg-danger text-white"
-                : "bg-card-bg text-muted border border-card-border"
-            }`}
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3 mb-4">
+        <div className="flex flex-col gap-1">
+          <label className="text-muted text-[10px] font-medium uppercase tracking-wide">Status</label>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+            className="bg-card-bg border border-card-border text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-primary cursor-pointer min-w-32"
           >
-            {s.charAt(0).toUpperCase() + s.slice(1)}
-          </button>
-        ))}
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-muted text-[10px] font-medium uppercase tracking-wide">Search</label>
+          <input
+            type="text"
+            placeholder="UTR, phone or name..."
+            value={utrSearch}
+            onChange={(e) => setUtrSearch(e.target.value)}
+            className="bg-card-bg border border-card-border text-white text-sm rounded-lg px-3 py-2 placeholder:text-muted focus:outline-none focus:border-primary min-w-40"
+          />
+        </div>
       </div>
 
-      {fetching ? <p className="text-muted">Loading...</p> : utrList.length === 0 ? <p className="text-muted">No {statusFilter} UTRs</p> : (
+      {fetching ? <p className="text-muted">Loading...</p> : utrFiltered.length === 0 ? <p className="text-muted">No {statusFilter} {utrSearch ? `results for "${utrSearch}"` : "UTRs"}</p> : (
         <div className="flex flex-col gap-3">
-          {utrList.map((item: any) => (
+          {utrFiltered.map((item: any) => (
             <div key={item.id} className="bg-card-bg border border-card-border rounded-xl p-4">
               <div className="flex items-center justify-between mb-2">
                 <div>
