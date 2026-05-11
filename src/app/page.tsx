@@ -16,7 +16,7 @@ const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
 
 interface Admin { email: string; role: string; name: string; }
 
-type Section = "dashboard" | "requests" | "users" | "channels" | "crypto-wallets" | "referral" | "tiers" | "settings" | "admin-emails" | "bank-accounts" | "utrs";
+type Section = "dashboard" | "requests" | "users" | "channels" | "crypto-wallets" | "referral" | "first-deposit" | "tiers" | "settings" | "admin-emails" | "bank-accounts" | "utrs";
 
 function SuperAdminApp() {
   const [admin, setAdmin] = useState<Admin | null>(null);
@@ -93,6 +93,7 @@ function SuperAdminApp() {
     { key: "channels", label: "Channels", icon: <BsBank2 size={18} /> },
     { key: "crypto-wallets", label: "Crypto Wallets", icon: <FiDollarSign size={18} /> },
     { key: "referral", label: "Referral", icon: <FiGift size={18} /> },
+    { key: "first-deposit", label: "First Deposit Bonus", icon: <FiDollarSign size={18} /> },
     { key: "tiers", label: "Tiers", icon: <FiLayers size={18} /> },
     { key: "settings", label: "Settings", icon: <FiSettings size={18} /> },
     { key: "bank-accounts", label: "Bank Accounts", icon: <FiCreditCard size={18} /> },
@@ -151,6 +152,7 @@ function SuperAdminApp() {
           {section === "channels" && <ChannelsSection token={token} />}
           {section === "crypto-wallets" && <CryptoWalletsSection token={token} />}
           {section === "referral" && <ReferralSection token={token} />}
+          {section === "first-deposit" && <FirstDepositSection token={token} />}
           {section === "tiers" && <TiersSection token={token} />}
           {section === "settings" && <SettingsSection token={token} />}
           {section === "bank-accounts" && <BankAccountsSection token={token} />}
@@ -840,6 +842,99 @@ function ReferralSection({ token }: { token: string }) {
           <li>3. User B makes a deposit and it gets approved</li>
           <li>4. User A receives <span className="text-green-400 font-medium">{commission || "0"}%</span> of that first deposit as commission</li>
           <li>5. Commission is only paid once per referred user (first deposit only)</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function FirstDepositSection({ token }: { token: string }) {
+  const [commission, setCommission] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API_URL}/superadmin/settings`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => {
+        if (d.success) {
+          const setting = d.data.find((s: any) => s.key === "first_deposit_commission");
+          if (setting) setCommission(setting.value);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, [token]);
+
+  async function handleSave() {
+    if (!commission.trim() || isNaN(Number(commission)) || Number(commission) < 0) {
+      setMsg("Please enter a valid percentage.");
+      return;
+    }
+    setSaving(true);
+    setMsg("");
+    try {
+      const res = await fetch(`${API_URL}/superadmin/settings/upsert`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ key: "first_deposit_commission", value: commission.trim() }),
+      });
+      const d = await res.json();
+      if (d.success) setMsg("Saved!");
+      else throw new Error(d.message || "Failed");
+    } catch (err: any) {
+      setMsg(err.message || "Failed to save.");
+    } finally {
+      setSaving(false);
+      setTimeout(() => setMsg(""), 4000);
+    }
+  }
+
+  return (
+    <div>
+      <h2 className="text-white font-bold mb-2">First Deposit Bonus</h2>
+      <p className="text-muted text-xs mb-6">
+        Set the bonus percentage credited to a user on their very first approved deposit. Set to 0 to disable.
+      </p>
+
+      <div className="bg-card-bg border border-card-border rounded-xl p-4 mb-4 max-w-md">
+        <label className="text-muted text-xs mb-2 block">Bonus Percentage (%)</label>
+        {!loaded ? (
+          <p className="text-muted text-sm">Loading...</p>
+        ) : (
+          <div className="flex items-center gap-3">
+            <div className="flex items-center border border-card-border rounded-lg overflow-hidden flex-1">
+              <input
+                type="text"
+                placeholder="e.g. 10"
+                value={commission}
+                onChange={e => setCommission(e.target.value.replace(/[^0-9.]/g, ""))}
+                inputMode="decimal"
+                className="flex-1 text-white text-sm px-3 py-2.5 placeholder:text-muted"
+              />
+              <span className="text-muted font-bold px-3 text-sm border-l border-card-border">%</span>
+            </div>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="bg-success text-white px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50 shrink-0"
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        )}
+        {msg && <p className={`text-xs mt-3 ${msg.includes("Saved") ? "text-green-400" : "text-danger"}`}>{msg}</p>}
+      </div>
+
+      <div className="bg-[#1a2744] border border-card-border rounded-xl p-4 max-w-md">
+        <p className="text-white text-sm font-semibold mb-2">How it works</p>
+        <ul className="text-muted text-xs flex flex-col gap-1.5">
+          <li>1. User makes their first deposit request</li>
+          <li>2. Admin approves the deposit</li>
+          <li>3. User receives <span className="text-green-400 font-medium">{commission || "0"}%</span> of that deposit amount as a bonus</li>
+          <li>4. Bonus is credited directly to their wallet balance</li>
+          <li>5. Only applies once — on the very first approved deposit per user</li>
         </ul>
       </div>
     </div>
