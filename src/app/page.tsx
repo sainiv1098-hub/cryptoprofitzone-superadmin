@@ -431,62 +431,152 @@ function ChannelsSection({ token }: { token: string }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editData, setEditData] = useState<any>({});
-  const [uploading, setUploading] = useState(false);
-  const [form, setForm] = useState({ name: "", type: "upi", minAmount: "500", maxAmount: "200000", upiId: "", qrCodeUrl: "", bankAccountNo: "", bankIfsc: "", bankName: "", bankHolderName: "", walletAddress: "", sortOrder: "0" });
+
+
+  // Upload state: which context is uploading, per-context error
+  const [uploadingFor, setUploadingFor] = useState<"create" | "edit" | null>(null);
+  const [createQrError, setCreateQrError] = useState("");
+  const [editQrError, setEditQrError] = useState("");
+
+  // Create state
+  const [creating, setCreating] = useState(false);
+  const [createMsg, setCreateMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Update state
+  const [updating, setUpdating] = useState(false);
+  const [updateMsg, setUpdateMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const blankForm = { name: "", type: "upi", minAmount: "500", maxAmount: "200000", upiId: "", qrCodeUrl: "", bankAccountNo: "", bankIfsc: "", bankName: "", bankHolderName: "", walletAddress: "", sortOrder: "0" };
+  const [form, setForm] = useState(blankForm);
 
   useEffect(() => {
     fetch(`${API_URL}/superadmin/channels`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json()).then(d => { if (d.success) setChannels(d.data); });
   }, [token]);
 
-  async function uploadQR(file: File): Promise<string> {
-    setUploading(true);
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await fetch(`${API_URL}/upload/qr`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: fd,
-    });
+  async function uploadQR(file: File, context: "create" | "edit"): Promise<string | null> {
+    if (context === "create") setCreateQrError("");
+    else setEditQrError("");
+    setUploadingFor(context);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`${API_URL}/upload/qr`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      const d = await res.json();
+      if (d.success && d.url) return d.url;
+      const msg = d.message || "Upload failed";
+      if (context === "create") setCreateQrError(msg);
+      else setEditQrError(msg);
+      return null;
+    } catch {
+      const msg = "Upload failed: network error";
+      if (context === "create") setCreateQrError(msg);
+      else setEditQrError(msg);
+      return null;
+    } finally {
+      setUploadingFor(null);
+    }
+  }
+
+  async function refetchChannels() {
+    const res = await fetch(`${API_URL}/superadmin/channels`, { headers: { Authorization: `Bearer ${token}` } });
     const d = await res.json();
-    setUploading(false);
-    return d.success ? d.url : "";
+    if (d.success) setChannels(d.data);
   }
 
   async function handleCreate() {
-    const res = await fetch(`${API_URL}/superadmin/channels/create`, {
-      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ ...form, minAmount: parseInt(form.minAmount), maxAmount: parseInt(form.maxAmount), sortOrder: parseInt(form.sortOrder), active: true }),
-    });
-    const d = await res.json();
-    if (d.success) { setChannels(prev => [...prev, d.channel]); setShowForm(false); setForm({ name: "", type: "upi", minAmount: "500", maxAmount: "200000", upiId: "", qrCodeUrl: "", bankAccountNo: "", bankIfsc: "", bankName: "", bankHolderName: "", walletAddress: "", sortOrder: "0" }); }
+    if (!form.name.trim()) { setCreateMsg({ ok: false, text: "Channel name is required" }); return; }
+    setCreating(true);
+    setCreateMsg(null);
+    try {
+      const res = await fetch(`${API_URL}/superadmin/channels/create`, {
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          ...form,
+          upiId: form.upiId || null,
+          qrCodeUrl: form.qrCodeUrl || null,
+          bankAccountNo: form.bankAccountNo || null,
+          bankIfsc: form.bankIfsc || null,
+          bankName: form.bankName || null,
+          bankHolderName: form.bankHolderName || null,
+          walletAddress: form.walletAddress || null,
+          minAmount: parseInt(form.minAmount),
+          maxAmount: parseInt(form.maxAmount),
+          sortOrder: parseInt(form.sortOrder),
+          active: true,
+        }),
+      });
+      const d = await res.json();
+      if (d.success) {
+        await refetchChannels();
+        setShowForm(false);
+        setForm(blankForm);
+        setCreateQrError("");
+      } else {
+        setCreateMsg({ ok: false, text: d.message || "Failed to create channel" });
+      }
+    } catch {
+      setCreateMsg({ ok: false, text: "Network error, please try again" });
+    } finally {
+      setCreating(false);
+    }
   }
 
   async function handleUpdate(id: string) {
-    await fetch(`${API_URL}/superadmin/channels/update`, {
-      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ id, ...editData }),
-    });
-    setChannels(prev => prev.map(c => c.id === id ? { ...c, ...editData } : c));
-    setEditingId(null);
+    setUpdating(true);
+    setUpdateMsg(null);
+    try {
+      const res = await fetch(`${API_URL}/superadmin/channels/update`, {
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id, ...editData }),
+      });
+      const d = await res.json();
+      if (d.success) {
+        // Use DB-returned channel so local state matches exactly what was saved
+        setChannels(prev => prev.map(c => c.id === id ? d.channel : c));
+        setUpdateMsg({ ok: true, text: "Saved successfully!" });
+        setTimeout(() => { setEditingId(null); setUpdateMsg(null); setEditQrError(""); }, 1200);
+      } else {
+        setUpdateMsg({ ok: false, text: d.message || "Failed to save" });
+      }
+    } catch {
+      setUpdateMsg({ ok: false, text: "Network error, please try again" });
+    } finally {
+      setUpdating(false);
+    }
   }
 
   async function handleDelete(id: string) {
     if (!confirm("Delete this channel?")) return;
-    await fetch(`${API_URL}/superadmin/channels/delete`, {
+    const res = await fetch(`${API_URL}/superadmin/channels/delete`, {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ id }),
     });
-    setChannels(prev => prev.filter(c => c.id !== id));
+    const d = await res.json();
+    if (d.success) {
+      setChannels(prev => prev.filter(c => c.id !== id));
+      if (editingId === id) setEditingId(null);
+    } else {
+      alert(d.message || "Failed to delete channel");
+    }
   }
 
-  const inputCls = "border border-card-border rounded-lg px-3 py-2 text-white text-sm w-full";
+  const inputCls = "border border-card-border rounded-lg px-3 py-2 text-white text-sm w-full bg-transparent";
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-white font-bold">Deposit Channels</h2>
-        <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1 bg-primary text-white px-3 py-1.5 rounded-lg text-xs"><FiPlus size={14} /> Add Channel</button>
+        <button
+          onClick={() => { setShowForm(!showForm); setCreateMsg(null); setCreateQrError(""); }}
+          className="flex items-center gap-1 bg-primary text-white px-3 py-1.5 rounded-lg text-xs"
+        >
+          <FiPlus size={14} /> Add Channel
+        </button>
       </div>
 
       {/* Create form */}
@@ -494,33 +584,71 @@ function ChannelsSection({ token }: { token: string }) {
         <div className="bg-card-bg border border-card-border rounded-xl p-4 mb-4">
           <p className="text-white font-semibold text-sm mb-3">New Channel</p>
           <div className="grid grid-cols-2 gap-3">
-            <input placeholder="Name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className={inputCls} />
+            <input placeholder="Name *" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className={inputCls} />
             <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className={`${inputCls} bg-card-bg`}>
-              <option value="upi">UPI</option><option value="bank">Bank</option><option value="crypto">Crypto</option>
+              <option value="upi">UPI</option>
+              <option value="bank">Bank</option>
+              <option value="crypto">Crypto</option>
             </select>
             <input placeholder="Min Amount" value={form.minAmount} onChange={e => setForm({ ...form, minAmount: e.target.value })} className={inputCls} />
             <input placeholder="Max Amount" value={form.maxAmount} onChange={e => setForm({ ...form, maxAmount: e.target.value })} className={inputCls} />
+            <input placeholder="Sort Order" value={form.sortOrder} onChange={e => setForm({ ...form, sortOrder: e.target.value })} className={inputCls} />
+
             {form.type === "upi" && <>
               <input placeholder="UPI ID" value={form.upiId} onChange={e => setForm({ ...form, upiId: e.target.value })} className={inputCls} />
-              <div className="flex flex-col gap-2">
-                <input placeholder="QR Code URL (or upload below)" value={form.qrCodeUrl} onChange={e => setForm({ ...form, qrCodeUrl: e.target.value })} className={inputCls} />
-                <label className="flex items-center gap-2 bg-primary/20 text-primary text-xs px-3 py-2 rounded-lg cursor-pointer">
-                  {uploading ? "Uploading..." : "Upload QR Image"}
-                  <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (file) { const url = await uploadQR(file); if (url) setForm({ ...form, qrCodeUrl: url }); }
-                  }} />
-                </label>
+              <div className="col-span-2 flex flex-col gap-2">
+                <label className="text-muted text-xs">QR Code</label>
+                <input placeholder="Paste QR image URL (optional)" value={form.qrCodeUrl} onChange={e => setForm({ ...form, qrCodeUrl: e.target.value })} className={inputCls} />
+                <div className="flex gap-2">
+                  <label className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium cursor-pointer transition-colors ${uploadingFor === "create" ? "bg-primary/40 text-primary cursor-not-allowed" : "bg-primary/20 text-primary hover:bg-primary/30"}`}>
+                    {uploadingFor === "create" ? (
+                      <><span className="w-3 h-3 border border-primary border-t-transparent rounded-full animate-spin" /> Uploading...</>
+                    ) : form.qrCodeUrl ? "Replace QR" : "Upload QR Image"}
+                    <input type="file" accept="image/*" className="hidden" disabled={uploadingFor !== null} onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const url = await uploadQR(file, "create");
+                      if (url) setForm(prev => ({ ...prev, qrCodeUrl: url }));
+                      e.target.value = "";
+                    }} />
+                  </label>
+                  {form.qrCodeUrl && (
+                    <button
+                      type="button"
+                      onClick={() => { setForm(prev => ({ ...prev, qrCodeUrl: "" })); setCreateQrError(""); }}
+                      className="px-3 py-2 rounded-lg text-xs font-medium bg-danger/20 text-danger hover:bg-danger/30 transition-colors"
+                    >
+                      Remove QR
+                    </button>
+                  )}
+                </div>
+                {form.qrCodeUrl && <img src={form.qrCodeUrl} alt="QR Preview" className="w-20 h-20 rounded-lg bg-white p-1 object-contain" />}
+                {createQrError && <p className="text-danger text-xs">{createQrError}</p>}
               </div>
             </>}
+
             {form.type === "bank" && <>
               <input placeholder="Account No" value={form.bankAccountNo} onChange={e => setForm({ ...form, bankAccountNo: e.target.value })} className={inputCls} />
               <input placeholder="IFSC Code" value={form.bankIfsc} onChange={e => setForm({ ...form, bankIfsc: e.target.value })} className={inputCls} />
               <input placeholder="Bank Name" value={form.bankName} onChange={e => setForm({ ...form, bankName: e.target.value })} className={inputCls} />
               <input placeholder="Account Holder Name" value={form.bankHolderName} onChange={e => setForm({ ...form, bankHolderName: e.target.value })} className={inputCls} />
             </>}
-            {form.type === "crypto" && <input placeholder="Wallet Address" value={form.walletAddress} onChange={e => setForm({ ...form, walletAddress: e.target.value })} className={`col-span-2 ${inputCls}`} />}
-            <button onClick={handleCreate} className="col-span-2 bg-success text-white py-2 rounded-lg text-sm font-semibold">Create Channel</button>
+
+            {form.type === "crypto" && (
+              <input placeholder="Wallet Address" value={form.walletAddress} onChange={e => setForm({ ...form, walletAddress: e.target.value })} className={`col-span-2 ${inputCls}`} />
+            )}
+
+            {createMsg && (
+              <p className={`col-span-2 text-xs text-center font-medium ${createMsg.ok ? "text-success" : "text-danger"}`}>{createMsg.text}</p>
+            )}
+
+            <button
+              onClick={handleCreate}
+              disabled={creating || uploadingFor === "create"}
+              className="col-span-2 bg-success text-white py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {creating ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Creating...</> : "Create Channel"}
+            </button>
           </div>
         </div>
       )}
@@ -531,26 +659,34 @@ function ChannelsSection({ token }: { token: string }) {
           <div key={ch.id} className="bg-card-bg border border-card-border rounded-xl p-4">
             <div className="flex items-center justify-between mb-3">
               <div>
-                <p className="text-white font-semibold">{ch.name} <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/20 text-primary ml-1">{ch.type.toUpperCase()}</span></p>
+                <p className="text-white font-semibold">
+                  {ch.name}
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/20 text-primary ml-1">{ch.type.toUpperCase()}</span>
+                </p>
                 <p className="text-muted text-xs mt-0.5">Min: {ch.minAmount?.toLocaleString()} | Max: {ch.maxAmount?.toLocaleString()}</p>
               </div>
               <div className="flex gap-2">
-                <button onClick={() => { if (editingId === ch.id) { setEditingId(null); } else { setEditingId(ch.id); setEditData({ upiId: ch.upiId || "", qrCodeUrl: ch.qrCodeUrl || "", bankAccountNo: ch.bankAccountNo || "", bankIfsc: ch.bankIfsc || "", bankName: ch.bankName || "", bankHolderName: ch.bankHolderName || "", walletAddress: ch.walletAddress || "" }); } }} className="text-muted hover:text-white p-1"><FiEdit size={15} /></button>
+                <button
+                  onClick={() => {
+                    if (editingId === ch.id) { setEditingId(null); setUpdateMsg(null); setEditQrError(""); }
+                    else { setEditingId(ch.id); setUpdateMsg(null); setEditQrError(""); setEditData({ upiId: ch.upiId || "", qrCodeUrl: ch.qrCodeUrl || "", bankAccountNo: ch.bankAccountNo || "", bankIfsc: ch.bankIfsc || "", bankName: ch.bankName || "", bankHolderName: ch.bankHolderName || "", walletAddress: ch.walletAddress || "" }); }
+                  }}
+                  className="text-muted hover:text-white p-1"
+                >
+                  <FiEdit size={15} />
+                </button>
                 <button onClick={() => handleDelete(ch.id)} className="text-danger p-1"><FiTrash2 size={15} /></button>
               </div>
             </div>
 
-            {/* Show details */}
+            {/* Channel details */}
             {ch.type === "upi" && (
               <div className="flex gap-4 items-start">
-                {ch.qrCodeUrl ? (
-                  <img src={ch.qrCodeUrl} alt="QR" className="w-24 h-24 rounded-lg bg-white p-1 object-contain shrink-0" />
-                ) : (
-                  <div className="w-24 h-24 rounded-lg bg-[#1a2744] flex items-center justify-center text-muted text-xs shrink-0">No QR</div>
-                )}
-                <div className="text-xs">
-                  <p className="text-muted">UPI ID: <span className="text-white">{ch.upiId || "-"}</span></p>
-                </div>
+                {ch.qrCodeUrl
+                  ? <img src={ch.qrCodeUrl} alt="QR" className="w-24 h-24 rounded-lg bg-white p-1 object-contain shrink-0" />
+                  : <div className="w-24 h-24 rounded-lg bg-[#1a2744] flex items-center justify-center text-muted text-xs shrink-0">No QR</div>
+                }
+                <p className="text-xs text-muted">UPI ID: <span className="text-white">{ch.upiId || "-"}</span></p>
               </div>
             )}
             {ch.type === "bank" && (
@@ -567,28 +703,61 @@ function ChannelsSection({ token }: { token: string }) {
 
             {/* Edit form */}
             {editingId === ch.id && (
-              <div className="mt-3 pt-3 border-t border-card-border grid grid-cols-2 gap-3">
-                {ch.type === "upi" && <>
-                  <input placeholder="UPI ID" value={editData.upiId} onChange={e => setEditData({ ...editData, upiId: e.target.value })} className={inputCls} />
-                  <div className="flex flex-col gap-2">
-                    <input placeholder="QR Code URL" value={editData.qrCodeUrl} onChange={e => setEditData({ ...editData, qrCodeUrl: e.target.value })} className={inputCls} />
-                    <label className="flex items-center gap-2 bg-primary/20 text-primary text-xs px-3 py-2 rounded-lg cursor-pointer text-center justify-center">
-                      {uploading ? "Uploading..." : "Upload New QR"}
-                      <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        if (file) { const url = await uploadQR(file); if (url) setEditData({ ...editData, qrCodeUrl: url }); }
-                      }} />
-                    </label>
-                  </div>
-                </>}
-                {ch.type === "bank" && <>
-                  <input placeholder="Account No" value={editData.bankAccountNo} onChange={e => setEditData({ ...editData, bankAccountNo: e.target.value })} className={inputCls} />
-                  <input placeholder="IFSC Code" value={editData.bankIfsc} onChange={e => setEditData({ ...editData, bankIfsc: e.target.value })} className={inputCls} />
-                  <input placeholder="Bank Name" value={editData.bankName} onChange={e => setEditData({ ...editData, bankName: e.target.value })} className={inputCls} />
-                  <input placeholder="Holder Name" value={editData.bankHolderName} onChange={e => setEditData({ ...editData, bankHolderName: e.target.value })} className={inputCls} />
-                </>}
-                {ch.type === "crypto" && <input placeholder="Wallet Address" value={editData.walletAddress} onChange={e => setEditData({ ...editData, walletAddress: e.target.value })} className={`col-span-2 ${inputCls}`} />}
-                <button onClick={() => handleUpdate(ch.id)} className="col-span-2 bg-success text-white py-2 rounded-lg text-sm font-semibold">Save Changes</button>
+              <div className="mt-3 pt-3 border-t border-card-border flex flex-col gap-3">
+                <div className="grid grid-cols-2 gap-3">
+                  {ch.type === "upi" && <>
+                    <input placeholder="UPI ID" value={editData.upiId} onChange={e => setEditData({ ...editData, upiId: e.target.value })} className={inputCls} />
+                    <div className="flex flex-col gap-2">
+                      <input placeholder="QR Code URL" value={editData.qrCodeUrl} onChange={e => setEditData({ ...editData, qrCodeUrl: e.target.value })} className={inputCls} />
+                      <div className="flex gap-2">
+                        <label className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium cursor-pointer transition-colors ${uploadingFor === "edit" ? "bg-primary/40 text-primary cursor-not-allowed" : "bg-primary/20 text-primary hover:bg-primary/30"}`}>
+                          {uploadingFor === "edit" ? (
+                            <><span className="w-3 h-3 border border-primary border-t-transparent rounded-full animate-spin" /> Uploading...</>
+                          ) : editData.qrCodeUrl ? "Replace QR" : "Upload QR Image"}
+                          <input type="file" accept="image/*" className="hidden" disabled={uploadingFor !== null} onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const url = await uploadQR(file, "edit");
+                            if (url) setEditData((prev: any) => ({ ...prev, qrCodeUrl: url }));
+                            e.target.value = "";
+                          }} />
+                        </label>
+                        {editData.qrCodeUrl && (
+                          <button
+                            type="button"
+                            onClick={() => { setEditData((prev: any) => ({ ...prev, qrCodeUrl: "" })); setEditQrError(""); }}
+                            className="px-3 py-2 rounded-lg text-xs font-medium bg-danger/20 text-danger hover:bg-danger/30 transition-colors"
+                          >
+                            Remove QR
+                          </button>
+                        )}
+                      </div>
+                      {editData.qrCodeUrl && <img src={editData.qrCodeUrl} alt="QR Preview" className="w-20 h-20 rounded-lg bg-white p-1 object-contain" />}
+                      {editQrError && <p className="text-danger text-xs">{editQrError}</p>}
+                    </div>
+                  </>}
+                  {ch.type === "bank" && <>
+                    <input placeholder="Account No" value={editData.bankAccountNo} onChange={e => setEditData({ ...editData, bankAccountNo: e.target.value })} className={inputCls} />
+                    <input placeholder="IFSC Code" value={editData.bankIfsc} onChange={e => setEditData({ ...editData, bankIfsc: e.target.value })} className={inputCls} />
+                    <input placeholder="Bank Name" value={editData.bankName} onChange={e => setEditData({ ...editData, bankName: e.target.value })} className={inputCls} />
+                    <input placeholder="Holder Name" value={editData.bankHolderName} onChange={e => setEditData({ ...editData, bankHolderName: e.target.value })} className={inputCls} />
+                  </>}
+                  {ch.type === "crypto" && (
+                    <input placeholder="Wallet Address" value={editData.walletAddress} onChange={e => setEditData({ ...editData, walletAddress: e.target.value })} className={`col-span-2 ${inputCls}`} />
+                  )}
+                </div>
+
+                {updateMsg && editingId === ch.id && (
+                  <p className={`text-xs text-center font-medium ${updateMsg.ok ? "text-success" : "text-danger"}`}>{updateMsg.text}</p>
+                )}
+
+                <button
+                  onClick={() => handleUpdate(ch.id)}
+                  disabled={updating || uploadingFor === "edit"}
+                  className="w-full bg-success text-white py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {updating ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</> : "Save Changes"}
+                </button>
               </div>
             )}
           </div>
