@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 import { GoogleOAuthProvider, GoogleLogin } from "@react-oauth/google";
 import {
@@ -179,6 +179,8 @@ function RequestsSection({ token }: { token: string }) {
   const [search, setSearch] = useState("");
   const [data, setData] = useState<any[]>([]);
   const [fetching, setFetching] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const inFlight = useRef(new Set<string>());
 
   const fetchData = useCallback(async () => {
     setFetching(true);
@@ -198,17 +200,27 @@ function RequestsSection({ token }: { token: string }) {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   async function handleAction(id: string, status: string) {
+    if (inFlight.current.has(id)) return;
+    inFlight.current.add(id);
+    setActionLoading(id);
     const ep: Record<string, string> = {
       deposits: "/admin/update-transaction",
       withdrawals: "/admin/update-transaction",
       "sec-deposits": "/admin/update-security-deposit",
       "sec-withdrawals": "/admin/update-security-withdrawal",
     };
-    await fetch(`${API_URL}${ep[tab]}`, {
-      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ id, status }),
-    });
-    setData(prev => prev.filter(i => i.id !== id));
+    try {
+      await fetch(`${API_URL}${ep[tab]}`, {
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id, status }),
+      });
+      setData(prev => prev.filter(i => i.id !== id));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      inFlight.current.delete(id);
+      setActionLoading(null);
+    }
   }
 
   const filtered = search
@@ -300,8 +312,21 @@ function RequestsSection({ token }: { token: string }) {
 
               {statusFilter === "pending" && (
                 <div className="flex gap-2">
-                  <button onClick={() => handleAction(item.id, "approved")} className="flex-1 flex items-center justify-center gap-1.5 bg-success text-white py-2 rounded-lg text-sm font-semibold"><FiCheck size={16} /> Approve</button>
-                  <button onClick={() => handleAction(item.id, "rejected")} className="flex-1 flex items-center justify-center gap-1.5 bg-danger text-white py-2 rounded-lg text-sm font-semibold"><FiX size={16} /> Reject</button>
+                  <button
+                    onClick={() => handleAction(item.id, "approved")}
+                    disabled={actionLoading === item.id}
+                    className="flex-1 flex items-center justify-center gap-1.5 bg-success text-white py-2 rounded-lg text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {actionLoading === item.id ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <FiCheck size={16} />}
+                    {actionLoading === item.id ? "Processing..." : "Approve"}
+                  </button>
+                  <button
+                    onClick={() => handleAction(item.id, "rejected")}
+                    disabled={actionLoading === item.id}
+                    className="flex-1 flex items-center justify-center gap-1.5 bg-danger text-white py-2 rounded-lg text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    <FiX size={16} /> Reject
+                  </button>
                 </div>
               )}
             </div>
@@ -1409,6 +1434,8 @@ function UTRsSection({ token }: { token: string }) {
   const [utrSearch, setUtrSearch] = useState("");
   const [utrList, setUtrList] = useState<any[]>([]);
   const [fetching, setFetching] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const inFlight = useRef(new Set<string>());
 
   const fetchData = useCallback(async () => {
     setFetching(true);
@@ -1424,12 +1451,22 @@ function UTRsSection({ token }: { token: string }) {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   async function handleAction(id: string, status: string) {
-    await fetch(`${API_URL}/admin/update-utr`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ id, status }),
-    });
-    setUtrList(prev => prev.filter(i => i.id !== id));
+    if (inFlight.current.has(id)) return;
+    inFlight.current.add(id);
+    setActionLoading(id);
+    try {
+      await fetch(`${API_URL}/admin/update-utr`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id, status }),
+      });
+      setUtrList(prev => prev.filter(i => i.id !== id));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      inFlight.current.delete(id);
+      setActionLoading(null);
+    }
   }
 
   const utrFiltered = utrSearch
@@ -1493,8 +1530,21 @@ function UTRsSection({ token }: { token: string }) {
               <p className="text-muted text-[10px] mb-3">{new Date(item.createdAt).toLocaleString()} &bull; {item.id.slice(0, 8)}</p>
               {statusFilter === "pending" && (
                 <div className="flex gap-2">
-                  <button onClick={() => handleAction(item.id, "approved")} className="flex-1 flex items-center justify-center gap-1.5 bg-success text-white py-2 rounded-lg text-sm font-semibold"><FiCheck size={16} /> Approve</button>
-                  <button onClick={() => handleAction(item.id, "rejected")} className="flex-1 flex items-center justify-center gap-1.5 bg-danger text-white py-2 rounded-lg text-sm font-semibold"><FiX size={16} /> Reject</button>
+                  <button
+                    onClick={() => handleAction(item.id, "approved")}
+                    disabled={actionLoading === item.id}
+                    className="flex-1 flex items-center justify-center gap-1.5 bg-success text-white py-2 rounded-lg text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {actionLoading === item.id ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <FiCheck size={16} />}
+                    {actionLoading === item.id ? "Processing..." : "Approve"}
+                  </button>
+                  <button
+                    onClick={() => handleAction(item.id, "rejected")}
+                    disabled={actionLoading === item.id}
+                    className="flex-1 flex items-center justify-center gap-1.5 bg-danger text-white py-2 rounded-lg text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    <FiX size={16} /> Reject
+                  </button>
                 </div>
               )}
             </div>
