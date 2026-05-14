@@ -1332,98 +1332,210 @@ function AdminEmailsSection({ token }: { token: string }) {
 
 function BankAccountsSection({ token }: { token: string }) {
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "active" | "inactive">("all");
+  const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const inFlight = useRef(new Set<string>());
+
   useEffect(() => {
     fetch(`${API_URL}/superadmin/bank-accounts`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json()).then(d => { if (d.success) setAccounts(d.data); });
   }, [token]);
 
-  const bankAccts = accounts.filter(a => a.type !== "upi");
-  const upiAccts = accounts.filter(a => a.type === "upi");
+  async function handleStatus(id: string, status: "active" | "inactive") {
+    if (inFlight.current.has(id)) return;
+    inFlight.current.add(id);
+    setActionLoading(id);
+    try {
+      const res = await fetch(`${API_URL}/superadmin/bank-accounts/update-status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id, status }),
+      });
+      const d = await res.json();
+      if (d.success) setAccounts(prev => prev.map(a => a.id === id ? { ...a, status } : a));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      inFlight.current.delete(id);
+      setActionLoading(null);
+    }
+  }
+
+  // Filter by status + phone/name search
+  const filtered = accounts.filter(a => {
+    if (statusFilter !== "all" && a.status !== statusFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return (
+        a.userPhone?.toLowerCase().includes(q) ||
+        a.userName?.toLowerCase().includes(q) ||
+        a.bankName?.toLowerCase().includes(q) ||
+        a.accountHolderName?.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
+  // Group by userId
+  const userGroups: Map<string, { userPhone: string; userName: string | null; accounts: any[] }> = new Map();
+  for (const a of filtered) {
+    const key = a.userId ?? a.userPhone ?? "unknown";
+    if (!userGroups.has(key)) {
+      userGroups.set(key, { userPhone: a.userPhone ?? "Unknown", userName: a.userName ?? null, accounts: [] });
+    }
+    userGroups.get(key)!.accounts.push(a);
+  }
+
+  const pendingCount = accounts.filter(a => a.status === "pending").length;
+
+  function StatusBadge({ status }: { status: string }) {
+    return (
+      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+        status === "active" ? "bg-success/20 text-success" :
+        status === "pending" ? "bg-warning/20 text-warning" :
+        "bg-danger/20 text-danger"
+      }`}>{status}</span>
+    );
+  }
+
+  function ActionButtons({ a }: { a: any }) {
+    if (a.status !== "pending") return null;
+    return (
+      <div className="flex gap-2 mt-3">
+        <button
+          onClick={() => handleStatus(a.id, "active")}
+          disabled={actionLoading === a.id}
+          className="flex-1 flex items-center justify-center gap-1.5 bg-success text-white py-2 rounded-lg text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {actionLoading === a.id
+            ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            : <FiCheck size={14} />}
+          {actionLoading === a.id ? "Processing..." : "Approve"}
+        </button>
+        <button
+          onClick={() => handleStatus(a.id, "inactive")}
+          disabled={actionLoading === a.id}
+          className="flex-1 flex items-center justify-center gap-1.5 bg-danger text-white py-2 rounded-lg text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          <FiX size={14} /> Reject
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div>
-      {/* UPI Accounts */}
-      {upiAccts.length > 0 && (
-        <div className="mb-6">
-          <h2 className="text-white font-bold mb-4">UPI Accounts ({upiAccts.length})</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {upiAccts.map((a: any) => (
-              <div key={a.id} className="bg-card-bg border border-card-border rounded-xl p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-500/20 text-green-400">UPI</span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      a.status === "active" ? "bg-success/20 text-success" :
-                      a.status === "pending" ? "bg-warning/20 text-warning" :
-                      "bg-danger/20 text-danger"
-                    }`}>{a.status}</span>
-                  </div>
-                  <span className="text-muted text-[10px]">{a.userPhone}</span>
-                </div>
-                <p className="text-white text-sm font-semibold mb-1">{a.upiId}</p>
-                {a.accountHolderName && a.accountHolderName !== "-" && (
-                  <p className="text-muted text-xs mb-2">{a.accountHolderName}</p>
-                )}
-                <button
-                  onClick={() => setExpandedId(expandedId === a.id ? null : a.id)}
-                  className="text-primary text-[10px] font-medium"
-                >
-                  {expandedId === a.id ? "Hide QR" : "Show QR"}
-                </button>
-                {expandedId === a.id && a.upiId && (
-                  <div className="mt-3 flex justify-center">
-                    {a.qrCodeUrl ? (
-                      <img src={a.qrCodeUrl} alt="QR" className="w-32 h-32 rounded-lg bg-white p-1 object-contain" />
-                    ) : (
-                      <div className="w-32 h-32 rounded-lg bg-white p-2 flex items-center justify-center">
-                        <QRCode value={`upi://pay?pa=${a.upiId}`} size={112} />
-                      </div>
-                    )}
-                  </div>
-                )}
-                <p className="text-muted text-[10px] mt-2">{new Date(a.createdAt).toLocaleDateString()}</p>
-              </div>
-            ))}
-          </div>
+      {/* Header row */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <h2 className="text-white font-bold">Bank Accounts</h2>
+        {pendingCount > 0 && (
+          <span className="bg-warning/20 text-warning text-[10px] font-bold px-2 py-0.5 rounded-full">
+            {pendingCount} pending
+          </span>
+        )}
+        <div className="ml-auto flex flex-wrap gap-2">
+          <input
+            type="text"
+            placeholder="Search user / bank..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="bg-card-bg border border-card-border text-white text-sm rounded-lg px-3 py-1.5 placeholder:text-muted focus:outline-none focus:border-primary min-w-44"
+          />
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value as typeof statusFilter)}
+            className="bg-card-bg border border-card-border text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary cursor-pointer"
+          >
+            <option value="all">All</option>
+            <option value="pending">Pending</option>
+            <option value="active">Active</option>
+            <option value="inactive">Rejected</option>
+          </select>
         </div>
+      </div>
+
+      {userGroups.size === 0 && (
+        <p className="text-muted text-sm">No accounts found.</p>
       )}
 
-      {/* Bank Accounts */}
-      <h2 className="text-white font-bold mb-4">Bank Accounts ({bankAccts.length})</h2>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead><tr className="text-muted text-xs border-b border-card-border">
-            <th className="text-left py-2 px-2">User</th>
-            <th className="text-left py-2 px-2">Bank</th>
-            <th className="text-left py-2 px-2">Account No</th>
-            <th className="text-left py-2 px-2">Holder</th>
-            <th className="text-left py-2 px-2">IFSC</th>
-            <th className="text-left py-2 px-2">UPI ID</th>
-            <th className="text-left py-2 px-2">Status</th>
-            <th className="text-left py-2 px-2">Date</th>
-          </tr></thead>
-          <tbody>
-            {bankAccts.map((a: any) => (
-              <tr key={a.id} className="border-b border-card-border/50">
-                <td className="py-2 px-2 text-white text-xs">{a.userPhone}</td>
-                <td className="py-2 px-2 text-white text-xs">{a.bankName}</td>
-                <td className="py-2 px-2 text-muted text-xs">{a.accountNo}</td>
-                <td className="py-2 px-2 text-muted text-xs">{a.accountHolderName}</td>
-                <td className="py-2 px-2 text-muted text-xs">{a.ifscCode}</td>
-                <td className="py-2 px-2 text-cyan-400 text-xs">{a.upiId || "-"}</td>
-                <td className="py-2 px-2">
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    a.status === "active" ? "bg-success/20 text-success" :
-                    a.status === "pending" ? "bg-warning/20 text-warning" :
-                    "bg-danger/20 text-danger"
-                  }`}>{a.status}</span>
-                </td>
-                <td className="py-2 px-2 text-muted text-xs">{new Date(a.createdAt).toLocaleDateString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {/* One card per user */}
+      <div className="flex flex-col gap-4">
+        {Array.from(userGroups.entries()).map(([key, group]) => (
+          <div key={key} className="bg-card-bg border border-card-border rounded-2xl overflow-hidden">
+            {/* User header */}
+            <div className="flex items-center gap-3 px-4 py-3 bg-[#1a2744] border-b border-card-border">
+              <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
+                <FiUsers size={15} className="text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-white font-semibold text-sm">{group.userPhone}</p>
+                {group.userName && <p className="text-muted text-xs">{group.userName}</p>}
+              </div>
+              <span className="text-muted text-xs shrink-0">{group.accounts.length} account{group.accounts.length !== 1 ? "s" : ""}</span>
+            </div>
+
+            {/* Accounts list */}
+            <div className="divide-y divide-card-border/50">
+              {group.accounts.map((a: any) => (
+                <div key={a.id} className="p-4">
+                  {/* Account type + status row */}
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      a.type === "upi" ? "bg-green-500/20 text-green-400" : "bg-blue-500/20 text-blue-400"
+                    }`}>{a.type === "upi" ? "UPI" : "BANK"}</span>
+                    <StatusBadge status={a.status} />
+                    <span className="text-muted text-[10px] ml-auto">{new Date(a.createdAt).toLocaleDateString()}</span>
+                  </div>
+
+                  {/* Account details */}
+                  {a.type === "upi" ? (
+                    <div>
+                      <p className="text-white font-semibold text-sm mb-0.5">{a.upiId || "—"}</p>
+                      {a.accountHolderName && a.accountHolderName !== "-" && (
+                        <p className="text-muted text-xs mb-2">{a.accountHolderName}</p>
+                      )}
+                      {a.upiId && (
+                        <div>
+                          <button
+                            onClick={() => setExpandedId(expandedId === a.id ? null : a.id)}
+                            className="text-primary text-[10px] font-medium"
+                          >
+                            {expandedId === a.id ? "Hide QR" : "Show QR"}
+                          </button>
+                          {expandedId === a.id && (
+                            <div className="mt-3 flex justify-start">
+                              {a.qrCodeUrl ? (
+                                <img src={a.qrCodeUrl} alt="QR" className="w-28 h-28 rounded-lg bg-white p-1 object-contain" />
+                              ) : (
+                                <div className="w-28 h-28 rounded-lg bg-white p-2 flex items-center justify-center">
+                                  <QRCode value={`upi://pay?pa=${a.upiId}`} size={96} />
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                      <p className="text-muted">Bank: <span className="text-white">{a.bankName}</span></p>
+                      <p className="text-muted">Holder: <span className="text-white">{a.accountHolderName}</span></p>
+                      <p className="text-muted">Account No: <span className="text-white">{a.accountNo}</span></p>
+                      <p className="text-muted">IFSC: <span className="text-white">{a.ifscCode}</span></p>
+                      {a.upiId && a.upiId !== "-" && (
+                        <p className="text-muted col-span-2">UPI ID: <span className="text-cyan-400">{a.upiId}</span></p>
+                      )}
+                    </div>
+                  )}
+
+                  <ActionButtons a={a} />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
